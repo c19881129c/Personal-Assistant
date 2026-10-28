@@ -49,10 +49,20 @@ jobs:
           sed -i "s/jvmTarget = '1.8'/jvmTarget = '17'/g" android/app/build.gradle
           sed -i 's/android:label="work_secretary"/android:label="工作小秘書"/g' android/app/src/main/AndroidManifest.xml
           
-          # 【關鍵修復】關閉 Gradle 發布時的重複類別檢查，強制忽略衝突並順利打包
-          echo "android.defaultConfig.javaCompileOptions.annotationProcessorOptions.includeCompileClasspath=true" >> android/gradle.properties
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
+          # 👇 新增這段：自動將 Kotlin 版本衝突的解法寫入 build.gradle 底部
+          cat <<EOF >> android/app/build.gradle
+          
+          dependencies {
+              constraints {
+                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22") {
+                      because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
+                  }
+                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22") {
+                      because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
+                  }
+              }
+          }
+          EOF
 
       - name: 5. 下載套件並打包 Release APK
         run: |
