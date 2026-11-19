@@ -37,9 +37,9 @@ class WorkSecretaryApp extends StatelessWidget {
 class LogItem {
   final String id;
   final String timestamp;
-  final String project;
-  final String tag;
-  final String content;
+  String project;
+  String tag;
+  String content;
 
   LogItem({
     required this.id,
@@ -72,7 +72,7 @@ class LogItem {
 
 class TaskItem {
   final String id;
-  final String? sourceLogId; // 追蹤是否由某筆日誌轉入
+  final String? sourceLogId;
   String title;
   String project;
   String priority;
@@ -228,7 +228,121 @@ class _MainHomePageState extends State<MainHomePage> {
     _saveData();
   }
 
-  // 將日誌轉為待辦（記錄 sourceLogId，使該筆日誌按鈕隱藏）
+  // 編輯日誌對話框（支援修改專案、標籤與內容）
+  void _showEditLogDialog(LogItem log) {
+    final contentCtrl = TextEditingController(text: log.content);
+    String editProject = _projects.contains(log.project) ? log.project : _projects.first;
+    String editTag = _tags.contains(log.tag) ? log.tag : _tags.first;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('編輯日誌 (${log.dateKey} ${log.timeStr})'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: editProject,
+                  decoration: const InputDecoration(
+                    labelText: '所屬專案',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: _projects
+                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setDialogState(() => editProject = v);
+                  },
+                ),
+                const SizedBox(height: 12),
+                const Text('標籤分類：', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  children: _tags.map((t) {
+                    return ChoiceChip(
+                      label: Text(t),
+                      selected: editTag == t,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => setDialogState(() => editTag = t),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: contentCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '日誌內容',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final updatedText = contentCtrl.text.trim();
+                if (updatedText.isEmpty) return;
+                setState(() {
+                  log.project = editProject;
+                  log.tag = editTag;
+                  log.content = updatedText;
+                });
+                _saveData();
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('日誌已更新！')),
+                );
+              },
+              child: const Text('儲存修改'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 確認刪除日誌對話框
+  void _confirmDeleteLog(LogItem log) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('確認刪除紀錄'),
+        content: Text('確定要刪除這筆「【${log.project}】${log.content}」嗎？此動作無法復原。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () {
+              setState(() {
+                _logs.removeWhere((e) => e.id == log.id);
+              });
+              _saveData();
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已刪除該筆日誌')),
+              );
+            },
+            child: const Text('確認刪除'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _convertLogToTask(LogItem log) {
     String chosenPriority = 'P1';
     final titleCtrl = TextEditingController(text: log.content);
@@ -276,7 +390,7 @@ class _MainHomePageState extends State<MainHomePage> {
                 setState(() {
                   _tasks.add(TaskItem(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    sourceLogId: log.id, // 綁定來源 ID
+                    sourceLogId: log.id,
                     title: titleCtrl.text.trim(),
                     project: log.project,
                     priority: chosenPriority,
@@ -411,6 +525,9 @@ class _MainHomePageState extends State<MainHomePage> {
                       if (_selectedProject == proj) {
                         _selectedProject = _projects.first;
                       }
+                      if (_filterProject == proj) {
+                        _filterProject = '全部';
+                      }
                     });
                     _saveData();
                     Navigator.pop(ctx);
@@ -437,7 +554,7 @@ class _MainHomePageState extends State<MainHomePage> {
           controller: ctrl,
           autofocus: true,
           decoration: const InputDecoration(
-            hintText: '例如：#會議、#研究 (需包含 #)',
+            hintText: '例如：#會議、#研究 (自動補上 #)',
             border: OutlineInputBorder(),
           ),
         ),
@@ -492,6 +609,9 @@ class _MainHomePageState extends State<MainHomePage> {
                       _tags.remove(tag);
                       if (_selectedTag == tag) {
                         _selectedTag = _tags.first;
+                      }
+                      if (_filterTag == tag) {
+                        _filterTag = '全部';
                       }
                     });
                     _saveData();
@@ -789,7 +909,6 @@ class _MainHomePageState extends State<MainHomePage> {
                   itemCount: dayLogs.length,
                   itemBuilder: (ctx, i) {
                     final log = dayLogs[i];
-                    // 檢查這筆日誌是否已經轉為待辦
                     final bool isAlreadyTask = _tasks.any((t) => t.sourceLogId == log.id);
 
                     return Card(
@@ -844,7 +963,6 @@ class _MainHomePageState extends State<MainHomePage> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // 已經轉為待辦則隱藏按鈕，未轉則顯示
                             if (!isAlreadyTask)
                               IconButton(
                                 tooltip: '轉為待辦事項',
@@ -1001,7 +1119,6 @@ class _MainHomePageState extends State<MainHomePage> {
                         IconButton(
                           icon: const Icon(Icons.delete_outline),
                           onPressed: () {
-                            // 刪除待辦時，若有關聯 sourceLogId，該日誌的轉待辦按鈕會自動恢復顯示！
                             setState(() => _tasks.removeWhere((t) => t.id == task.id));
                             _saveData();
                           },
@@ -1021,17 +1138,21 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   // ==========================================
-  // 分頁 3：專案檢索
+  // 分頁 3：專案檢索（支援編輯、刪除日誌卡片）
   // ==========================================
   Widget _buildSearchTab() {
+    final safeFilterProject =
+        (_filterProject == '全部' || _projects.contains(_filterProject)) ? _filterProject : '全部';
+    final safeFilterTag =
+        (_filterTag == '全部' || _tags.contains(_filterTag)) ? _filterTag : '全部';
+
     final filteredLogs = _logs.where((log) {
-      final matchProject = _filterProject == '1' || log.project == _filterProject; // 防呆
-      final matchProjActual = _filterProject == '全部' || log.project == _filterProject;
-      final matchTag = _filterTag == '全部' || log.tag == _filterTag;
+      final matchProject = safeFilterProject == '全部' || log.project == safeFilterProject;
+      final matchTag = safeFilterTag == '全部' || log.tag == safeFilterTag;
       final matchKeyword = _searchKeyword.isEmpty ||
           log.content.toLowerCase().contains(_searchKeyword.toLowerCase()) ||
           log.project.toLowerCase().contains(_searchKeyword.toLowerCase());
-      return matchProjActual && matchTag && matchKeyword;
+      return matchProject && matchTag && matchKeyword;
     }).toList()
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
 
@@ -1055,7 +1176,7 @@ class _MainHomePageState extends State<MainHomePage> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _filterProject,
+                      value: safeFilterProject,
                       decoration: const InputDecoration(
                         labelText: '專案過濾',
                         border: OutlineInputBorder(),
@@ -1072,7 +1193,7 @@ class _MainHomePageState extends State<MainHomePage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _filterTag,
+                      value: safeFilterTag,
                       decoration: const InputDecoration(
                         labelText: '標籤過濾',
                         border: OutlineInputBorder(),
@@ -1100,6 +1221,7 @@ class _MainHomePageState extends State<MainHomePage> {
                   itemBuilder: (ctx, i) {
                     final log = filteredLogs[i];
                     return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
                       child: ListTile(
                         title: Text(
                           '${log.dateKey} ${log.timeStr}  【${log.project}】 ${log.tag}',
@@ -1110,8 +1232,23 @@ class _MainHomePageState extends State<MainHomePage> {
                           ),
                         ),
                         subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.only(top: 6),
                           child: Text(log.content, style: const TextStyle(fontSize: 15)),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: '編輯日誌卡片',
+                              icon: const Icon(Icons.edit_outlined, color: Colors.blue),
+                              onPressed: () => _showEditLogDialog(log),
+                            ),
+                            IconButton(
+                              tooltip: '刪除日誌卡片',
+                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              onPressed: () => _confirmDeleteLog(log),
+                            ),
+                          ],
                         ),
                       ),
                     );
