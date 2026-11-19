@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       app_version:
-        description: '版本號 (可輸入小數點，例如 1.0 或 1.1)'
+        description: '版本號 (例如 1.3)'
         required: true
-        default: '1.1'
+        default: '1.3'
+
+permissions:
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -33,13 +36,24 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 4. 自動生成 Android 底層專案結構與 SDK 規格設定
+      - name: 4. 自動生成 Android 專案結構與固定簽章設定
         run: |
+          if [ ! -f "release.jks" ]; then
+            keytool -genkeypair -v -keystore release.jks -alias secretary_key -keyalg RSA -keysize 2048 -validity 10000 -storepass secretary123 -keypass secretary123 -dname "CN=WorkSecretary, OU=App, O=Personal, L=Taipei, S=Taiwan, C=TW"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add release.jks
+            git commit -m "chore: save permanent android signing keystore"
+            git push
+          fi
+
           cp pubspec.yaml pubspec.yaml.bak
           cp -r lib lib_bak
           flutter create --platforms=android --org com.secretary.app --project-name work_secretary .
           mv pubspec.yaml.bak pubspec.yaml
           rm -rf lib && mv lib_bak lib
+          cp release.jks android/app/release.jks
+
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/g' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 26/g' android/app/build.gradle
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle
@@ -47,22 +61,11 @@ jobs:
           sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' android/app/build.gradle
           sed -i 's/jvmTarget = JavaVersion.VERSION_17/jvmTarget = "17"/g' android/app/build.gradle
           sed -i "s/jvmTarget = '1.8'/jvmTarget = '17'/g" android/app/build.gradle
+          sed -i '/buildTypes {/i signingConfigs { release { storeFile file("release.jks"); storePassword "secretary123"; keyPassword "secretary123"; keyAlias "secretary_key" } }' android/app/build.gradle
+          sed -i 's/signingConfigs.debug/signingConfigs.release/g' android/app/build.gradle
           sed -i 's/android:label="work_secretary"/android:label="工作小秘書"/g' android/app/src/main/AndroidManifest.xml
-          
-          # 👇 新增這段：自動將 Kotlin 版本衝突的解法寫入 build.gradle 底部
-          cat <<EOF >> android/app/build.gradle
-          
-          dependencies {
-              constraints {
-                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22") {
-                      because("kotlin-stdlib-jdk7 is now a part of kotlin-stdlib")
-                  }
-                  implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22") {
-                      because("kotlin-stdlib-jdk8 is now a part of kotlin-stdlib")
-                  }
-              }
-          }
-          EOF
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
 
       - name: 5. 下載套件並打包 Release APK
         run: |
