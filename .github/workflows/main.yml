@@ -64,8 +64,15 @@ jobs:
           sed -i '/buildTypes {/i signingConfigs { release { storeFile file("release.jks"); storePassword "secretary123"; keyPassword "secretary123"; keyAlias "secretary_key" } }' android/app/build.gradle
           sed -i 's/signingConfigs.debug/signingConfigs.release/g' android/app/build.gradle
           sed -i 's/android:label="work_secretary"/android:label="工作小秘書"/g' android/app/src/main/AndroidManifest.xml
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
+
+          # 【關鍵修復】強制排除重複的舊版 Kotlin 模組，統一 AndroidX 版本
+          cat << 'EOF' >> android/app/build.gradle
+
+          configurations.all {
+              exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+              exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+          }
+          EOF
 
       - name: 5. 下載套件並打包 Release APK
         run: |
